@@ -1,195 +1,202 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>4D Graphics - Step 1</title>
+<meta charset="utf-8">
+<title>N-Dimensional Wireframe</title>
+
 <style>
-body {
-    margin: 0;
-    background: #111;
-    overflow: hidden;
+body{
+    margin:0;
+    overflow:hidden;
+    background:#111;
 }
-canvas {
-    display: block;
+
+canvas{
+    display:block;
 }
 </style>
 </head>
+
 <body>
 
 <canvas id="canvas"></canvas>
 
 <script>
 
+////////////////////////////////////////////////////////////
+// Configuration
+
+const DIMENSIONS = 4;
+
+const CAMERA_DISTANCE = 4;
+
+const SCALE = 250;
+
+////////////////////////////////////////////////////////////
+
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+function resize(){
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
 }
-window.addEventListener("resize", resize);
+
+addEventListener("resize",resize);
 resize();
 
 ////////////////////////////////////////////////////////////
-// Cube
+// Hypercube
 
-const vertices = [
-[-1,-1,-1],
-[ 1,-1,-1],
-[ 1, 1,-1],
-[-1, 1,-1],
-[-1,-1, 1],
-[ 1,-1, 1],
-[ 1, 1, 1],
-[-1, 1, 1]
-];
+function makeVertices(n){
 
-const edges = [
-[0,1],[1,2],[2,3],[3,0],
-[4,5],[5,6],[6,7],[7,4],
-[0,4],[1,5],[2,6],[3,7]
-];
+    const vertices=[];
 
-////////////////////////////////////////////////////////////
-// Matrix utilities
+    for(let bits=0; bits<(1<<n); bits++){
 
-function identity() {
-    return [
-        [1,0,0],
-        [0,1,0],
-        [0,0,1]
-    ];
-}
+        const v=[];
 
-function multiplyMatrix(a,b){
+        for(let i=0;i<n;i++)
+            v.push((bits&(1<<i)) ? 1 : -1);
 
-    let r = identity();
+        vertices.push(v);
 
-    for(let i=0;i<3;i++){
-        for(let j=0;j<3;j++){
-            r[i][j]=0;
-            for(let k=0;k<3;k++){
-                r[i][j]+=a[i][k]*b[k][j];
-            }
-        }
     }
 
-    return r;
+    return vertices;
 }
 
-function multiplyVector(m,v){
+function makeEdges(n){
 
-    return [
-        m[0][0]*v[0]+m[0][1]*v[1]+m[0][2]*v[2],
-        m[1][0]*v[0]+m[1][1]*v[1]+m[1][2]*v[2],
-        m[2][0]*v[0]+m[2][1]*v[1]+m[2][2]*v[2]
-    ];
+    const edges=[];
+
+    for(let v=0;v<(1<<n);v++){
+
+        for(let axis=0;axis<n;axis++){
+
+            const u=v^(1<<axis);
+
+            if(v<u)
+                edges.push([v,u]);
+
+        }
+
+    }
+
+    return edges;
+
+}
+
+const vertices = makeVertices(DIMENSIONS);
+const edges = makeEdges(DIMENSIONS);
+
+////////////////////////////////////////////////////////////
+// Rotations
+
+const rotations=[];
+
+for(let i=0;i<DIMENSIONS;i++){
+
+    for(let j=i+1;j<DIMENSIONS;j++){
+
+        rotations.push({
+
+            a:i,
+            b:j,
+
+            speed:
+                0.2+
+                Math.random()*0.8
+
+        });
+
+    }
+
+}
+
+function rotate(v,a,b,angle){
+
+    const out=[...v];
+
+    const c=Math.cos(angle);
+    const s=Math.sin(angle);
+
+    out[a]=c*v[a]-s*v[b];
+    out[b]=s*v[a]+c*v[b];
+
+    return out;
 
 }
 
 ////////////////////////////////////////////////////////////
-// Rotation matrices
-
-function rotX(a){
-
-    const c=Math.cos(a);
-    const s=Math.sin(a);
-
-    return [
-        [1,0,0],
-        [0,c,-s],
-        [0,s,c]
-    ];
-
-}
-
-function rotY(a){
-
-    const c=Math.cos(a);
-    const s=Math.sin(a);
-
-    return [
-        [ c,0,s],
-        [ 0,1,0],
-        [-s,0,c]
-    ];
-
-}
-
-function rotZ(a){
-
-    const c=Math.cos(a);
-    const s=Math.sin(a);
-
-    return [
-        [c,-s,0],
-        [s, c,0],
-        [0, 0,1]
-    ];
-
-}
-
-////////////////////////////////////////////////////////////
-// Perspective
+// Recursive projection
 
 function project(v){
 
-    const camera = 5;
+    v=[...v];
 
-    const z = v[2] + camera;
+    while(v.length>2){
 
-    const scale = 400 / z;
+        const last=v[v.length-1];
+
+        const scale=CAMERA_DISTANCE/(CAMERA_DISTANCE-last);
+
+        v=v
+            .slice(0,-1)
+            .map(x=>x*scale);
+
+    }
 
     return [
-        canvas.width/2 + v[0]*scale,
-        canvas.height/2 - v[1]*scale
+        canvas.width/2+v[0]*SCALE,
+        canvas.height/2-v[1]*SCALE
     ];
 
 }
 
 ////////////////////////////////////////////////////////////
 
-let angle=0;
+let time=0;
 
 function draw(){
 
-    angle += 0.01;
+    requestAnimationFrame(draw);
+
+    time+=0.01;
 
     ctx.fillStyle="#111";
     ctx.fillRect(0,0,canvas.width,canvas.height);
 
-    const rx = rotX(angle*0.7);
-    const ry = rotY(angle);
-    const rz = rotZ(angle*0.3);
-
-    const rotation =
-        multiplyMatrix(
-            rz,
-            multiplyMatrix(
-                ry,
-                rx
-            )
-        );
-
     const projected=[];
 
-    for(const v of vertices){
+    for(const vertex of vertices){
 
-        const rotated = multiplyVector(rotation,v);
+        let v=[...vertex];
 
-        projected.push(project(rotated));
+        for(const r of rotations){
+
+            v=rotate(
+                v,
+                r.a,
+                r.b,
+                time*r.speed
+            );
+
+        }
+
+        projected.push(project(v));
 
     }
 
     ctx.strokeStyle="white";
-    ctx.lineWidth=2;
+    ctx.lineWidth=1.5;
 
     ctx.beginPath();
 
-    for(const e of edges){
+    for(const edge of edges){
 
-        const a=projected[e[0]];
-        const b=projected[e[1]];
+        const a=projected[edge[0]];
+        const b=projected[edge[1]];
 
         ctx.moveTo(a[0],a[1]);
         ctx.lineTo(b[0],b[1]);
@@ -198,7 +205,11 @@ function draw(){
 
     ctx.stroke();
 
-    requestAnimationFrame(draw);
+    ctx.fillStyle="white";
+    ctx.font="16px sans-serif";
+    ctx.fillText(`${DIMENSIONS}D Hypercube`,20,30);
+    ctx.fillText(`${vertices.length} vertices`,20,50);
+    ctx.fillText(`${edges.length} edges`,20,70);
 
 }
 
