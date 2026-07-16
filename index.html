@@ -2,122 +2,490 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>N-Dimensional Wireframe</title>
+<title>N-D Explorer</title>
 
 <style>
+:root{
+    color-scheme:dark;
+    font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+
+*{
+    box-sizing:border-box;
+}
+
 body{
     margin:0;
     overflow:hidden;
-    background:#111;
+    background:#0d1117;
+    color:#e6edf3;
+}
+
+#app{
+    display:flex;
+    width:100vw;
+    height:100vh;
+}
+
+#controls{
+    width:320px;
+    max-width:85vw;
+    padding:20px;
+    overflow:auto;
+    background:#161b22;
+    border-right:1px solid #30363d;
+}
+
+#controls.hidden{
+    display:none;
+}
+
+h1{
+    margin:0 0 8px;
+    font-size:24px;
+}
+
+h2{
+    margin:24px 0 12px;
+    font-size:15px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:#8b949e;
+}
+
+.control-row{
+    display:grid;
+    gap:8px;
+    margin:14px 0;
+}
+
+.inline-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+}
+
+label{
+    color:#c9d1d9;
+    font-size:14px;
+}
+
+input[type="range"],
+select{
+    width:100%;
+}
+
+select{
+    padding:9px 10px;
+    border:1px solid #30363d;
+    border-radius:8px;
+    background:#0d1117;
+    color:#e6edf3;
+}
+
+button{
+    padding:9px 12px;
+    border:1px solid #30363d;
+    border-radius:8px;
+    background:#21262d;
+    color:#e6edf3;
+    cursor:pointer;
+}
+
+button:hover{
+    background:#30363d;
+}
+
+.button-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+}
+
+.rotation-row{
+    display:grid;
+    grid-template-columns:58px 1fr 44px;
+    align-items:center;
+    gap:10px;
+    margin:10px 0;
+}
+
+.rotation-row label{
+    display:flex;
+    align-items:center;
+    gap:6px;
+}
+
+#stage{
+    position:relative;
+    flex:1;
+    min-width:0;
 }
 
 canvas{
     display:block;
+    width:100%;
+    height:100%;
+}
+
+#stats{
+    position:absolute;
+    top:16px;
+    left:16px;
+    padding:12px 14px;
+    min-width:150px;
+    border:1px solid rgba(255,255,255,0.12);
+    border-radius:10px;
+    background:rgba(13,17,23,0.72);
+    color:#e6edf3;
+    font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    pointer-events:none;
+}
+
+.help{
+    margin-top:18px;
+    color:#8b949e;
+    font-size:13px;
+    line-height:1.5;
 }
 </style>
 </head>
 
 <body>
 
-<canvas id="canvas"></canvas>
+<div id="app">
+    <aside id="controls">
+        <h1>N-D Explorer</h1>
+        <p class="help">Explore hypercubes and simplexes by changing dimensions, projection, and independent plane rotations.</p>
+
+        <h2>Shape</h2>
+        <div class="control-row">
+            <label for="shape">Geometry</label>
+            <select id="shape">
+                <option value="hypercube">Hypercube</option>
+                <option value="simplex">Simplex</option>
+            </select>
+        </div>
+
+        <h2>Dimensions</h2>
+        <div class="control-row">
+            <div class="inline-row">
+                <label for="dimensions">Dimensions</label>
+                <span id="dimensionsValue"></span>
+            </div>
+            <input id="dimensions" type="range" min="2" max="8" step="1">
+        </div>
+
+        <h2>Projection</h2>
+        <div class="control-row inline-row">
+            <label for="perspective">Perspective projection</label>
+            <input id="perspective" type="checkbox">
+        </div>
+        <div class="control-row">
+            <div class="inline-row">
+                <label for="cameraDistance">Camera distance</label>
+                <span id="cameraDistanceValue"></span>
+            </div>
+            <input id="cameraDistance" type="range" min="2.5" max="12" step="0.1">
+        </div>
+
+        <h2>Rotation Controls</h2>
+        <div id="rotationControls"></div>
+
+        <h2>Buttons</h2>
+        <div class="button-grid">
+            <button id="pauseButton">Pause</button>
+            <button id="resumeButton">Resume</button>
+            <button id="resetButton">Reset</button>
+            <button id="randomizeButton">Randomize</button>
+        </div>
+
+        <p class="help">Keyboard: Space pauses/resumes, R randomizes, P toggles projection, H hides the UI.</p>
+    </aside>
+
+    <main id="stage">
+        <canvas id="canvas"></canvas>
+        <div id="stats"></div>
+    </main>
+</div>
 
 <script>
 
 ////////////////////////////////////////////////////////////
 // Configuration
+////////////////////////////////////////////////////////////
 
-const DIMENSIONS = 4;
+const AXIS_NAMES = "XYZWVUABCDEFGHIJKLMNOPQRST";
+const BASE_SCALE = 250;
 
-const CAMERA_DISTANCE = 4;
+const state = {
+    shape:"hypercube",
+    dimensions:4,
+    cameraDistance:4,
+    perspective:true,
+    paused:false,
+    autoRotate:true,
+    vertices:[],
+    edges:[],
+    rotations:[],
+    time:0,
+    lastFrameTime:performance.now(),
+    fps:0
+};
 
-const SCALE = 250;
-
+////////////////////////////////////////////////////////////
+// Canvas setup
 ////////////////////////////////////////////////////////////
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+const controls = document.getElementById("controls");
+const stats = document.getElementById("stats");
 
 function resize(){
-    canvas.width = innerWidth;
-    canvas.height = innerHeight;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
 }
 
 addEventListener("resize",resize);
-resize();
 
 ////////////////////////////////////////////////////////////
-// Hypercube
+// UI
+////////////////////////////////////////////////////////////
+
+const shapeInput = document.getElementById("shape");
+const dimensionsInput = document.getElementById("dimensions");
+const dimensionsValue = document.getElementById("dimensionsValue");
+const perspectiveInput = document.getElementById("perspective");
+const cameraDistanceInput = document.getElementById("cameraDistance");
+const cameraDistanceValue = document.getElementById("cameraDistanceValue");
+const rotationControls = document.getElementById("rotationControls");
+
+function axisName(index){
+    return AXIS_NAMES[index] || `A${index}`;
+}
+
+function planeName(rotation){
+    return `${axisName(rotation.a)}${axisName(rotation.b)}`;
+}
+
+function shapeLabel(){
+    return state.shape === "simplex" ? "Simplex" : "Hypercube";
+}
+
+function syncControls(){
+    shapeInput.value = state.shape;
+    dimensionsInput.value = state.dimensions;
+    dimensionsValue.textContent = `${state.dimensions}D`;
+    perspectiveInput.checked = state.perspective;
+    cameraDistanceInput.value = state.cameraDistance;
+    cameraDistanceValue.textContent = state.cameraDistance.toFixed(1);
+}
+
+function buildRotationControls(){
+    rotationControls.innerHTML = "";
+
+    for(const rotation of state.rotations){
+        const row = document.createElement("div");
+        row.className = "rotation-row";
+
+        const checkboxLabel = document.createElement("label");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = rotation.enabled;
+        checkbox.addEventListener("input",()=>{
+            rotation.enabled = checkbox.checked;
+        });
+        checkboxLabel.append(checkbox,planeName(rotation));
+
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = "-2";
+        slider.max = "2";
+        slider.step = "0.01";
+        slider.value = rotation.speed;
+
+        const value = document.createElement("span");
+        value.textContent = rotation.speed.toFixed(2);
+
+        slider.addEventListener("input",()=>{
+            rotation.speed = Number(slider.value);
+            value.textContent = rotation.speed.toFixed(2);
+        });
+
+        row.append(checkboxLabel,slider,value);
+        rotationControls.append(row);
+    }
+}
+
+function setPaused(paused){
+    state.paused = paused;
+}
+
+function resetExplorer(){
+    state.time = 0;
+    state.paused = false;
+    buildGeometry();
+    syncControls();
+    buildRotationControls();
+}
+
+function randomizeRotationSpeeds(){
+    for(const rotation of state.rotations){
+        const direction = Math.random() < 0.5 ? -1 : 1;
+        rotation.speed = direction * (0.15 + Math.random() * 1.35);
+    }
+    buildRotationControls();
+}
+
+shapeInput.addEventListener("input",()=>{
+    state.shape = shapeInput.value;
+    buildGeometry();
+});
+
+dimensionsInput.addEventListener("input",()=>{
+    state.dimensions = Number(dimensionsInput.value);
+    buildGeometry();
+    dimensionsValue.textContent = `${state.dimensions}D`;
+    buildRotationControls();
+});
+
+perspectiveInput.addEventListener("input",()=>{
+    state.perspective = perspectiveInput.checked;
+});
+
+cameraDistanceInput.addEventListener("input",()=>{
+    state.cameraDistance = Number(cameraDistanceInput.value);
+    cameraDistanceValue.textContent = state.cameraDistance.toFixed(1);
+});
+
+document.getElementById("pauseButton").addEventListener("click",()=>setPaused(true));
+document.getElementById("resumeButton").addEventListener("click",()=>setPaused(false));
+document.getElementById("resetButton").addEventListener("click",resetExplorer);
+document.getElementById("randomizeButton").addEventListener("click",randomizeRotationSpeeds);
+
+////////////////////////////////////////////////////////////
+// Geometry
+////////////////////////////////////////////////////////////
 
 function makeVertices(n){
-
     const vertices=[];
 
     for(let bits=0; bits<(1<<n); bits++){
-
         const v=[];
 
-        for(let i=0;i<n;i++)
+        for(let i=0;i<n;i++){
             v.push((bits&(1<<i)) ? 1 : -1);
+        }
 
         vertices.push(v);
-
     }
 
     return vertices;
 }
 
-function makeEdges(n){
-
+function makeHypercubeEdges(n){
     const edges=[];
 
     for(let v=0;v<(1<<n);v++){
-
         for(let axis=0;axis<n;axis++){
-
             const u=v^(1<<axis);
 
-            if(v<u)
+            if(v<u){
                 edges.push([v,u]);
-
+            }
         }
-
     }
 
     return edges;
-
 }
 
-const vertices = makeVertices(DIMENSIONS);
-const edges = makeEdges(DIMENSIONS);
+function makeSimplexVertices(n){
+    const sourceDimension = n + 1;
+    const vertices=[];
+    const basis=[];
 
-////////////////////////////////////////////////////////////
-// Rotations
+    for(let k=0;k<n;k++){
+        const denominator = Math.sqrt((k+1) * (k+2));
+        const vector = Array(sourceDimension).fill(0);
 
-const rotations=[];
+        for(let i=0;i<=k;i++){
+            vector[i] = 1 / denominator;
+        }
 
-for(let i=0;i<DIMENSIONS;i++){
-
-    for(let j=i+1;j<DIMENSIONS;j++){
-
-        rotations.push({
-
-            a:i,
-            b:j,
-
-            speed:
-                0.2+
-                Math.random()*0.8
-
-        });
-
+        vector[k+1] = -(k+1) / denominator;
+        basis.push(vector);
     }
 
+    for(let vertexIndex=0;vertexIndex<sourceDimension;vertexIndex++){
+        const centered = Array(sourceDimension).fill(-1 / sourceDimension);
+        centered[vertexIndex] += 1;
+
+        vertices.push(basis.map(axis=>dot(centered,axis) * Math.sqrt(2 * sourceDimension)));
+    }
+
+    return vertices;
 }
 
+function makeCompleteGraphEdges(vertexCount){
+    const edges=[];
+
+    for(let i=0;i<vertexCount;i++){
+        for(let j=i+1;j<vertexCount;j++){
+            edges.push([i,j]);
+        }
+    }
+
+    return edges;
+}
+
+function dot(a,b){
+    let sum = 0;
+
+    for(let i=0;i<a.length;i++){
+        sum += a[i] * b[i];
+    }
+
+    return sum;
+}
+
+function makeRotations(n){
+    const rotations=[];
+
+    for(let i=0;i<n;i++){
+        for(let j=i+1;j<n;j++){
+            rotations.push({
+                a:i,
+                b:j,
+                enabled:true,
+                speed:0.2 + Math.random() * 0.8
+            });
+        }
+    }
+
+    return rotations;
+}
+
+function buildGeometry(){
+    if(state.shape === "simplex"){
+        state.vertices = makeSimplexVertices(state.dimensions);
+        state.edges = makeCompleteGraphEdges(state.vertices.length);
+    }else{
+        state.vertices = makeVertices(state.dimensions);
+        state.edges = makeHypercubeEdges(state.dimensions);
+    }
+
+    state.rotations = makeRotations(state.dimensions);
+}
+
+////////////////////////////////////////////////////////////
+// Rotation
+////////////////////////////////////////////////////////////
+
 function rotate(v,a,b,angle){
-
     const out=[...v];
-
     const c=Math.cos(angle);
     const s=Math.sin(angle);
 
@@ -125,95 +493,129 @@ function rotate(v,a,b,angle){
     out[b]=s*v[a]+c*v[b];
 
     return out;
-
 }
 
 ////////////////////////////////////////////////////////////
-// Recursive projection
+// Projection
+////////////////////////////////////////////////////////////
 
 function project(v){
-
     v=[...v];
 
     while(v.length>2){
-
         const last=v[v.length-1];
+        const scale = state.perspective
+            ? state.cameraDistance/(state.cameraDistance-last)
+            : 1;
 
-        const scale=CAMERA_DISTANCE/(CAMERA_DISTANCE-last);
-
-        v=v
-            .slice(0,-1)
-            .map(x=>x*scale);
-
+        v=v.slice(0,-1).map(x=>x*scale);
     }
 
-    return [
-        canvas.width/2+v[0]*SCALE,
-        canvas.height/2-v[1]*SCALE
-    ];
+    const scale = Math.min(BASE_SCALE, Math.min(canvas.width,canvas.height) * 0.32);
 
+    return [
+        canvas.width/2+v[0]*scale,
+        canvas.height/2-v[1]*scale
+    ];
 }
 
 ////////////////////////////////////////////////////////////
+// Rendering
+////////////////////////////////////////////////////////////
 
-let time=0;
-
-function draw(){
-
-    requestAnimationFrame(draw);
-
-    time+=0.01;
-
-    ctx.fillStyle="#111";
+function drawScene(){
+    ctx.fillStyle="#0d1117";
     ctx.fillRect(0,0,canvas.width,canvas.height);
 
     const projected=[];
 
-    for(const vertex of vertices){
-
+    for(const vertex of state.vertices){
         let v=[...vertex];
 
-        for(const r of rotations){
-
-            v=rotate(
-                v,
-                r.a,
-                r.b,
-                time*r.speed
-            );
-
+        for(const rotation of state.rotations){
+            if(rotation.enabled){
+                v=rotate(v,rotation.a,rotation.b,state.time*rotation.speed);
+            }
         }
 
         projected.push(project(v));
-
     }
 
-    ctx.strokeStyle="white";
+    ctx.strokeStyle="#f0f6fc";
     ctx.lineWidth=1.5;
-
     ctx.beginPath();
 
-    for(const edge of edges){
-
+    for(const edge of state.edges){
         const a=projected[edge[0]];
         const b=projected[edge[1]];
 
         ctx.moveTo(a[0],a[1]);
         ctx.lineTo(b[0],b[1]);
-
     }
 
     ctx.stroke();
 
-    ctx.fillStyle="white";
-    ctx.font="16px sans-serif";
-    ctx.fillText(`${DIMENSIONS}D Hypercube`,20,30);
-    ctx.fillText(`${vertices.length} vertices`,20,50);
-    ctx.fillText(`${edges.length} edges`,20,70);
-
+    stats.innerHTML = [
+        `Shape: ${shapeLabel()}`,
+        `Dimensions: ${state.dimensions}`,
+        `Vertices: ${state.vertices.length}`,
+        `Edges: ${state.edges.length}`,
+        `FPS: ${state.fps.toFixed(0)}`
+    ].join("<br>");
 }
 
-draw();
+////////////////////////////////////////////////////////////
+// Interaction
+////////////////////////////////////////////////////////////
+
+addEventListener("keydown",event=>{
+    if(event.target && ["INPUT","BUTTON"].includes(event.target.tagName)){
+        return;
+    }
+
+    if(event.code === "Space"){
+        event.preventDefault();
+        state.paused = !state.paused;
+    }
+
+    if(event.key.toLowerCase() === "r"){
+        randomizeRotationSpeeds();
+    }
+
+    if(event.key.toLowerCase() === "p"){
+        state.perspective = !state.perspective;
+        syncControls();
+    }
+
+    if(event.key.toLowerCase() === "h"){
+        controls.classList.toggle("hidden");
+        resize();
+    }
+});
+
+////////////////////////////////////////////////////////////
+// Animation
+////////////////////////////////////////////////////////////
+
+function draw(now){
+    requestAnimationFrame(draw);
+
+    const delta = (now - state.lastFrameTime) / 1000;
+    state.lastFrameTime = now;
+    state.fps = state.fps * 0.9 + (1 / Math.max(delta,0.001)) * 0.1;
+
+    if(!state.paused && state.autoRotate){
+        state.time += delta;
+    }
+
+    drawScene();
+}
+
+buildGeometry();
+syncControls();
+buildRotationControls();
+resize();
+requestAnimationFrame(draw);
 
 </script>
 
