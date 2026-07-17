@@ -391,7 +391,7 @@ function makeVertices(n){
         const v=[];
 
         for(let i=0;i<n;i++){
-            v.push((bits&(1<<i)) ? 1 : -1);
+            v.push((bits&(1<<i)) ? 1 : 0);
         }
 
         vertices.push(v);
@@ -417,27 +417,16 @@ function makeHypercubeEdges(n){
 }
 
 function makeSimplexVertices(n){
-    const sourceDimension = n + 1;
     const vertices=[];
-    const basis=[];
+    
+    const vector = Array(n).fill(0);
+    vertices.push(vector);
+    
 
     for(let k=0;k<n;k++){
-        const denominator = Math.sqrt((k+1) * (k+2));
-        const vector = Array(sourceDimension).fill(0);
-
-        for(let i=0;i<=k;i++){
-            vector[i] = 1 / denominator;
-        }
-
-        vector[k+1] = -(k+1) / denominator;
-        basis.push(vector);
-    }
-
-    for(let vertexIndex=0;vertexIndex<sourceDimension;vertexIndex++){
-        const centered = Array(sourceDimension).fill(-1 / sourceDimension);
-        centered[vertexIndex] += 1;
-
-        vertices.push(basis.map(axis=>dot(centered,axis) * Math.sqrt(2 * sourceDimension)));
+        const vector = Array(n).fill(0);
+        vector[k] = 1;
+        vertices.push(vector);
     }
 
     return vertices;
@@ -468,14 +457,20 @@ function dot(a,b){
 function makeRotations(n){
     const rotations=[];
 
-    for(let i=0;i<n;i++){
-        for(let j=i+1;j<n;j++){
+    const totalRotations = n * (n - 1) / 2;
+    let k = 0;
+
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
             rotations.push({
-                a:i,
-                b:j,
-                enabled:true,
-                speed:0.2 + Math.random() * 0.8
+              a: i,
+                b: j,
+                enabled: true,
+               speed: totalRotations === 1
+                    ? 0
+                    : (2 * k) / (totalRotations - 1)
             });
+            k++;
         }
     }
 
@@ -541,19 +536,22 @@ function colorFromDiscardedAxes(discarded){
         return "#f0f6fc";
     }
 
-    let weightedSum=0;
-    let totalWeight=0;
+    let weightedSum = 0;
+    let totalWeight = 0;
 
-    for(let i=0;i<discarded.length;i++){
-        const weight=i+1;
+    for(let i = 0; i < discarded.length; i++){
+        const weight = i + 1;
         weightedSum += discarded[i] * weight;
         totalWeight += weight;
     }
 
-    const normalized = weightedSum / Math.max(totalWeight * Math.sqrt(state.dimensions),0.001);
-    const hue = 210 + 190 * Math.max(-1,Math.min(1,normalized));
+    const normalized = weightedSum / Math.max(totalWeight * Math.sqrt(state.dimensions), 0.001);
+    const clamped = Math.max(-1, Math.min(1, normalized));
 
-    return `hsl(${hue} 82% 68%)`;
+    // Map [-1, 1] -> [20, 80]
+    const lightness = 50 + 50 * clamped;
+
+    return `hsl(0 0% ${lightness}%)`;
 }
 
 ////////////////////////////////////////////////////////////
@@ -568,7 +566,12 @@ function drawScene(){
 
     for(const vertex of state.vertices){
         let v=[...vertex];
-
+        
+        const period = 3;
+        const t = state.time % (2 * period);
+        const value = period - Math.abs(t - period);
+        v = v.map(c => c * value);
+        
         for(const rotation of state.rotations){
             if(rotation.enabled){
                 v=rotate(v,rotation.a,rotation.b,state.time*rotation.speed);
