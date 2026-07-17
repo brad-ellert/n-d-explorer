@@ -190,6 +190,13 @@ canvas{
             <input id="cameraDistance" type="range" min="2.5" max="12" step="0.1">
         </div>
 
+        <h2>Coloring</h2>
+        <div class="control-row inline-row">
+            <label for="colorByDepth">Color by discarded axes</label>
+            <input id="colorByDepth" type="checkbox">
+        </div>
+        <p class="help">Colors encode the coordinates discarded while recursively projecting down to the canvas.</p>
+
         <h2>Rotation Controls</h2>
         <div id="rotationControls"></div>
 
@@ -224,6 +231,7 @@ const state = {
     dimensions:4,
     cameraDistance:4,
     perspective:true,
+    colorByDepth:true,
     paused:false,
     autoRotate:true,
     vertices:[],
@@ -261,6 +269,7 @@ const dimensionsValue = document.getElementById("dimensionsValue");
 const perspectiveInput = document.getElementById("perspective");
 const cameraDistanceInput = document.getElementById("cameraDistance");
 const cameraDistanceValue = document.getElementById("cameraDistanceValue");
+const colorByDepthInput = document.getElementById("colorByDepth");
 const rotationControls = document.getElementById("rotationControls");
 
 function axisName(index){
@@ -282,6 +291,7 @@ function syncControls(){
     perspectiveInput.checked = state.perspective;
     cameraDistanceInput.value = state.cameraDistance;
     cameraDistanceValue.textContent = state.cameraDistance.toFixed(1);
+    colorByDepthInput.checked = state.colorByDepth;
 }
 
 function buildRotationControls(){
@@ -359,6 +369,10 @@ perspectiveInput.addEventListener("input",()=>{
 cameraDistanceInput.addEventListener("input",()=>{
     state.cameraDistance = Number(cameraDistanceInput.value);
     cameraDistanceValue.textContent = state.cameraDistance.toFixed(1);
+});
+
+colorByDepthInput.addEventListener("input",()=>{
+    state.colorByDepth = colorByDepthInput.checked;
 });
 
 document.getElementById("pauseButton").addEventListener("click",()=>setPaused(true));
@@ -501,9 +515,11 @@ function rotate(v,a,b,angle){
 
 function project(v){
     v=[...v];
+    const discarded=[];
 
     while(v.length>2){
         const last=v[v.length-1];
+        discarded.push(last);
         const scale = state.perspective
             ? state.cameraDistance/(state.cameraDistance-last)
             : 1;
@@ -513,10 +529,31 @@ function project(v){
 
     const scale = Math.min(BASE_SCALE, Math.min(canvas.width,canvas.height) * 0.32);
 
-    return [
-        canvas.width/2+v[0]*scale,
-        canvas.height/2-v[1]*scale
-    ];
+    return {
+        x:canvas.width/2+v[0]*scale,
+        y:canvas.height/2-v[1]*scale,
+        discarded
+    };
+}
+
+function colorFromDiscardedAxes(discarded){
+    if(!state.colorByDepth){
+        return "#f0f6fc";
+    }
+
+    let weightedSum=0;
+    let totalWeight=0;
+
+    for(let i=0;i<discarded.length;i++){
+        const weight=i+1;
+        weightedSum += discarded[i] * weight;
+        totalWeight += weight;
+    }
+
+    const normalized = weightedSum / Math.max(totalWeight * Math.sqrt(state.dimensions),0.001);
+    const hue = 210 + 190 * Math.max(-1,Math.min(1,normalized));
+
+    return `hsl(${hue} 82% 68%)`;
 }
 
 ////////////////////////////////////////////////////////////
@@ -541,19 +578,28 @@ function drawScene(){
         projected.push(project(v));
     }
 
-    ctx.strokeStyle="#f0f6fc";
     ctx.lineWidth=1.5;
-    ctx.beginPath();
 
     for(const edge of state.edges){
         const a=projected[edge[0]];
         const b=projected[edge[1]];
+        const gradient=ctx.createLinearGradient(a.x,a.y,b.x,b.y);
+        gradient.addColorStop(0,colorFromDiscardedAxes(a.discarded));
+        gradient.addColorStop(1,colorFromDiscardedAxes(b.discarded));
 
-        ctx.moveTo(a[0],a[1]);
-        ctx.lineTo(b[0],b[1]);
+        ctx.strokeStyle=gradient;
+        ctx.beginPath();
+        ctx.moveTo(a.x,a.y);
+        ctx.lineTo(b.x,b.y);
+        ctx.stroke();
     }
 
-    ctx.stroke();
+    for(const point of projected){
+        ctx.fillStyle=colorFromDiscardedAxes(point.discarded);
+        ctx.beginPath();
+        ctx.arc(point.x,point.y,2.5,0,Math.PI*2);
+        ctx.fill();
+    }
 
     stats.innerHTML = [
         `Shape: ${shapeLabel()}`,
