@@ -71,8 +71,17 @@ label{
     font-size:14px;
 }
 
-input[type="range"]{
+input[type="range"],
+select{
     width:100%;
+}
+
+select{
+    padding:9px 10px;
+    border:1px solid #30363d;
+    border-radius:8px;
+    background:#0d1117;
+    color:#e6edf3;
 }
 
 button{
@@ -148,7 +157,16 @@ canvas{
 <div id="app">
     <aside id="controls">
         <h1>N-D Explorer</h1>
-        <p class="help">Explore hypercubes by changing dimensions, projection, and independent plane rotations.</p>
+        <p class="help">Explore hypercubes and simplexes by changing dimensions, projection, and independent plane rotations.</p>
+
+        <h2>Shape</h2>
+        <div class="control-row">
+            <label for="shape">Geometry</label>
+            <select id="shape">
+                <option value="hypercube">Hypercube</option>
+                <option value="simplex">Simplex</option>
+            </select>
+        </div>
 
         <h2>Dimensions</h2>
         <div class="control-row">
@@ -202,6 +220,7 @@ const AXIS_NAMES = "XYZWVUABCDEFGHIJKLMNOPQRST";
 const BASE_SCALE = 250;
 
 const state = {
+    shape:"hypercube",
     dimensions:4,
     cameraDistance:4,
     perspective:true,
@@ -236,6 +255,7 @@ addEventListener("resize",resize);
 // UI
 ////////////////////////////////////////////////////////////
 
+const shapeInput = document.getElementById("shape");
 const dimensionsInput = document.getElementById("dimensions");
 const dimensionsValue = document.getElementById("dimensionsValue");
 const perspectiveInput = document.getElementById("perspective");
@@ -251,7 +271,12 @@ function planeName(rotation){
     return `${axisName(rotation.a)}${axisName(rotation.b)}`;
 }
 
+function shapeLabel(){
+    return state.shape === "simplex" ? "Simplex" : "Hypercube";
+}
+
 function syncControls(){
+    shapeInput.value = state.shape;
     dimensionsInput.value = state.dimensions;
     dimensionsValue.textContent = `${state.dimensions}D`;
     perspectiveInput.checked = state.perspective;
@@ -315,6 +340,11 @@ function randomizeRotationSpeeds(){
     buildRotationControls();
 }
 
+shapeInput.addEventListener("input",()=>{
+    state.shape = shapeInput.value;
+    buildGeometry();
+});
+
 dimensionsInput.addEventListener("input",()=>{
     state.dimensions = Number(dimensionsInput.value);
     buildGeometry();
@@ -356,7 +386,7 @@ function makeVertices(n){
     return vertices;
 }
 
-function makeEdges(n){
+function makeHypercubeEdges(n){
     const edges=[];
 
     for(let v=0;v<(1<<n);v++){
@@ -370,6 +400,55 @@ function makeEdges(n){
     }
 
     return edges;
+}
+
+function makeSimplexVertices(n){
+    const sourceDimension = n + 1;
+    const vertices=[];
+    const basis=[];
+
+    for(let k=0;k<n;k++){
+        const denominator = Math.sqrt((k+1) * (k+2));
+        const vector = Array(sourceDimension).fill(0);
+
+        for(let i=0;i<=k;i++){
+            vector[i] = 1 / denominator;
+        }
+
+        vector[k+1] = -(k+1) / denominator;
+        basis.push(vector);
+    }
+
+    for(let vertexIndex=0;vertexIndex<sourceDimension;vertexIndex++){
+        const centered = Array(sourceDimension).fill(-1 / sourceDimension);
+        centered[vertexIndex] += 1;
+
+        vertices.push(basis.map(axis=>dot(centered,axis) * Math.sqrt(2 * sourceDimension)));
+    }
+
+    return vertices;
+}
+
+function makeCompleteGraphEdges(vertexCount){
+    const edges=[];
+
+    for(let i=0;i<vertexCount;i++){
+        for(let j=i+1;j<vertexCount;j++){
+            edges.push([i,j]);
+        }
+    }
+
+    return edges;
+}
+
+function dot(a,b){
+    let sum = 0;
+
+    for(let i=0;i<a.length;i++){
+        sum += a[i] * b[i];
+    }
+
+    return sum;
 }
 
 function makeRotations(n){
@@ -390,8 +469,14 @@ function makeRotations(n){
 }
 
 function buildGeometry(){
-    state.vertices = makeVertices(state.dimensions);
-    state.edges = makeEdges(state.dimensions);
+    if(state.shape === "simplex"){
+        state.vertices = makeSimplexVertices(state.dimensions);
+        state.edges = makeCompleteGraphEdges(state.vertices.length);
+    }else{
+        state.vertices = makeVertices(state.dimensions);
+        state.edges = makeHypercubeEdges(state.dimensions);
+    }
+
     state.rotations = makeRotations(state.dimensions);
 }
 
@@ -471,6 +556,7 @@ function drawScene(){
     ctx.stroke();
 
     stats.innerHTML = [
+        `Shape: ${shapeLabel()}`,
         `Dimensions: ${state.dimensions}`,
         `Vertices: ${state.vertices.length}`,
         `Edges: ${state.edges.length}`,
